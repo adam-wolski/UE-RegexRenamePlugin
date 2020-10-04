@@ -15,10 +15,11 @@
 #include "Widgets/SCompoundWidget.h"				 // SCompoundWidget
 #include "Widgets/SWindow.h"						 // SWindow
 #include "Widgets/Text/STextBlock.h"				 // STextBlock
+#include "Widgets/Views/SListView.h"				 // SListView
 
 #define LOCTEXT_NAMESPACE "RegexRename"
 
-void RenameSelected(const FString& FindPattern, const FString& ReplacePattern)
+TArray<FAssetRenameData> GetRenamedSelected(const FString& FindPattern, const FString& ReplacePattern)
 {
 	const FRegexPattern RegexPattern{FindPattern};
 
@@ -55,7 +56,7 @@ void RenameSelected(const FString& FindPattern, const FString& ReplacePattern)
 		RenamedAssets.Add({Asset, AssetData.PackagePath.ToString(), NewAssetName});
 	}
 
-	FAssetToolsModule::GetModule().Get().RenameAssets(RenamedAssets);
+	return RenamedAssets;
 };
 
 class SRegexRename final : public SCompoundWidget
@@ -64,48 +65,137 @@ public:
 	SLATE_BEGIN_ARGS(SRegexRename) {}
 	SLATE_END_ARGS()
 
+	using FPreviewItem = TSharedPtr<TPair<FString, FString>>;
+	using FPreview = SListView<FPreviewItem>;
+
+	TArray<FPreviewItem> PreviewItems;
+	TSharedPtr<FPreview> Preview = SNew(FPreview);
+
+	TSharedPtr<SEditableTextBox> FindPattern = SNew(SEditableTextBox);
+	TSharedPtr<SEditableTextBox> ReplacePattern = SNew(SEditableTextBox);
+
+	void UpdatePreviewItems()
+	{
+		TArray<FAssetRenameData> RenamedAssets =
+			GetRenamedSelected(FindPattern->GetText().ToString(), ReplacePattern->GetText().ToString());
+
+		PreviewItems.Reset();
+
+		for (const FAssetRenameData& RenamedAsset : RenamedAssets)
+		{
+			PreviewItems.Add(MakeShared<TPair<FString, FString>>(RenamedAsset.Asset->GetName(), RenamedAsset.NewName));
+		}
+
+		Preview->RebuildList();
+	}
+
 	void Construct(const FArguments& InArgs, TSharedRef<SWindow>& Window)
 	{
-		TSharedRef<SEditableTextBox> FindPattern = SNew(SEditableTextBox);
-		TSharedRef<SEditableTextBox> ReplacePattern = SNew(SEditableTextBox);
+		Preview =
+			SNew(FPreview)
+				.ListItemsSource(&PreviewItems)
+				.SelectionMode(ESelectionMode::None)
+				.OnGenerateRow_Lambda([](FPreviewItem Item,
+										 const TSharedRef<class STableViewBase>& OwnerTable) -> TSharedRef<ITableRow> {
+					return SNew(STableRow<TSharedPtr<FText>>, OwnerTable)
+							[
+								SNew(SHorizontalBox)
+								+SHorizontalBox::Slot()
+								.AutoWidth()
+								.Padding(0, 5, 10, 5)
+								[
+									SNew(STextBlock).Text(FText::FromString(*Item->Key))
+								]
+								+SHorizontalBox::Slot()
+								.AutoWidth()
+								.Padding(0, 5, 10, 5)
+								[
+									SNew(STextBlock).Text(FText::FromString(*Item->Value))
+								]
+							];
+				});
+
+		FindPattern =
+			SNew(SEditableTextBox).OnTextChanged_Lambda([this](const FText& Text) {
+				UpdatePreviewItems();
+			});
+
+		ReplacePattern = 
+			SNew(SEditableTextBox).OnTextChanged_Lambda([this](const FText& Text) {
+				UpdatePreviewItems();
+			});
+
+		FMargin Padding{10, 10, 10, 10};
 
 		ChildSlot
 		[
 			SNew(SVerticalBox)
 			+ SVerticalBox::Slot()
+			.AutoHeight()
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot()
+				.FillWidth(1.F)
+				.Padding(Padding)
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("FindPattern", "Find pattern"))
 				]
 				+ SHorizontalBox::Slot()
-				.FillWidth(5.F)
+				.Padding(Padding)
+				.FillWidth(2.F)
 				[
-					FindPattern
+					FindPattern.ToSharedRef()
 				]
 			]
 			+ SVerticalBox::Slot()
+			.AutoHeight()
 			[
 				SNew(SHorizontalBox)
 				+ SHorizontalBox::Slot()
+				.FillWidth(1.F)
+				.Padding(Padding)
 				[
 					SNew(STextBlock)
 					.Text(LOCTEXT("ReplacePattern", "Replace pattern"))
 				]
 				+ SHorizontalBox::Slot()
-				.FillWidth(5.F)
+				.FillWidth(2.F)
+				.Padding(Padding)
 				[
-					ReplacePattern
+					ReplacePattern.ToSharedRef()
 				]
 			]
 			+ SVerticalBox::Slot()
+			.AutoHeight()
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot()
+				.Padding(Padding)
+				[
+					SNew(STextBlock)
+					.Text(LOCTEXT("Preview", "Preview"))
+				]
+				+ SHorizontalBox::Slot()
+				.FillWidth(2.F)
+				.AutoWidth()
+				.Padding(Padding)
+				[
+					Preview.ToSharedRef()
+				]
+			]
+			+ SVerticalBox::Slot()
+			.AutoHeight()
 			[
 				SNew(SButton)
 				.Text(LOCTEXT("RenameButton", "Rename selected assets"))
-				.OnClicked(FOnClicked::CreateLambda([FindPattern, ReplacePattern, Window]() {
-					RenameSelected(FindPattern->GetText().ToString(), ReplacePattern->GetText().ToString());	
+				.OnClicked(FOnClicked::CreateLambda([this, Window]() {
+					auto RenamedAssets = 
+						GetRenamedSelected(FindPattern->GetText().ToString(), 
+								           ReplacePattern->GetText().ToString());	
+
+					FAssetToolsModule::GetModule().Get().RenameAssets(RenamedAssets);
+
 					Window->RequestDestroyWindow();
 					return FReply::Handled();
 				}))
@@ -131,9 +221,8 @@ class FRegexRenameModule final : public IModuleInterface
 				auto MenuExtension = [](FMenuBuilder& MenuBuilder) {
 					auto ShowRenameWindow = []() {
 						TSharedRef<SWindow> RenameWindow = SNew(SWindow)
-															   .Title(LOCTEXT("RenameWindow", "Regex Rename"))
-															   .MinWidth(700.F)
-															   .MinHeight(100.F);
+														   .Title(LOCTEXT("RenameWindow", "Regex Rename"))
+														   .SizingRule(ESizingRule::Autosized);
 
 						RenameWindow->SetContent(SNew(SRegexRename, RenameWindow));
 

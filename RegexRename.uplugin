@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Regex Rename",
+	"Description": "Rename assets using regex expressions",
+	"Category": "Editor",
+	"CreatedBy": "Adam Wolski",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"EnabledByDefault": true,
+	"CanContainContent": false,
+	"IsBetaVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "RegexRename",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
